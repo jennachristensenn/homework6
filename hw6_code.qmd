@@ -1,0 +1,266 @@
+---
+title: "Advanced Function Writing"
+format: html
+editor: visual
+author: Jenna Christensen
+---
+
+```{r, warning = FALSE}
+library(purrr)
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(lubridate)
+```
+
+## Task 1: Conceptual Questions
+
+1. What is the purpose of the lapply() function? What is the equivalent purrr function?
+
+> To apply a function to every element of a list, The equivalent in purrr is map().
+
+2. Suppose we have a list called my_list. Each element of the list is a numeric data frame (all columns are numeric). We want use lapply() to run the code cor(numeric_matrix, method = "kendall") on each element of the list. Write code to do this below! 
+
+> lapply(my_list, function(numeric_matrix) {
+    cor(numeric_matrix, method = "kendall")})
+
+3. 3. What are two advantages of using purrr functions instead of the BaseR apply family?
+
+> Base R has syntax inconsistencies and purr provides more functionality while also being cleaner. 
+
+4. What is a side-effect function?
+
+> It changes the state of something such as printing out data or plotting. It does not transform the data, it produces something. 
+
+5. Why can you name a variable sd in a function and not cause any issues with the sd function?
+
+> A temporary function environment is created when a function is called. 
+
+## Task 2: Writing R Functions
+
+RMSE function that takes in a vector of responses and predictions 
+```{r}
+getRMSE <- function(resp, pred, ...){
+  clean <- !is.na(resp)
+  rmse <- sqrt(mean((resp[clean] - pred[clean])^2, ...))
+  return(rmse)
+}
+```
+
+Creating response values and predictions
+```{r}
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp <- 3 + 10 * x + rnorm(n)
+pred <- predict(lm(resp ~ x), data.frame(x))
+```
+
+Testing RMSE function
+```{r}
+# testing with original values
+test_rmse <- getRMSE(resp, pred)
+print(test_rmse)
+
+# testing with na values without ... included
+resp[c(10, 99)] <- NA_real_
+test_rmse1 <- getRMSE(resp, pred)
+print(test_rmse1)
+
+# testing with na values with ... included
+test_rmse2 <- getRMSE(resp, pred, na.rm = TRUE)
+print(test_rmse2)
+```
+
+MAE function that takes in a vector of responses and predictions 
+```{r}
+getMAE <- function(resp, pred, ...){
+  clean <- !is.na(resp)
+  mae <- mean(abs(resp[clean] - pred[clean]), ...)
+  return(mae)
+}
+```
+
+Creating response values and predictions
+```{r}
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp <- 3 + 10 * x + rnorm(n)
+pred <- predict(lm(resp ~ x), data.frame(x))
+```
+
+Testing MAE function
+```{r}
+# testing with original values
+test_mae <- getMAE(resp, pred)
+print(test_mae)
+
+# testing with na values without ... included
+resp[c(10, 99)] <- NA_real_
+test_mae1 <- getMAE(resp, pred)
+print(test_mae1)
+
+# testing with na values with ... included
+test_mae2 <- getMAE(resp, pred, na.rm = TRUE)
+print(test_mae2)
+```
+
+Creating a wrapper function using the above as helper functions
+```{r}
+common_metrics <- function(resp, pred, metrics = c("RMSE", "MAE"), ...){
+  if (!is.numeric(resp) || !is.atomic(resp) || !is.vector(resp)) {
+    stop("'resp' argument must be a numeric atomic vector")}
+   if (!is.numeric(pred) || !is.atomic(pred) || !is.vector(pred)) {
+    stop("'pred' argument must be a numeric atomic vector")}
+  
+  out <- list()
+  if ("RMSE" %in% metrics) {
+    out$RMSE <- getRMSE(resp, pred, ...)}
+  if ("MAE" %in% metrics) {
+    out$MAE <- getMAE(resp, pred, ...)}
+  
+  return(out)
+}
+```
+
+Creating response values and predictions
+```{r}
+set.seed(10)
+n <- 100
+x <- runif(n)
+resp <- 3 + 10 * x + rnorm(n)
+pred <- predict(lm(resp ~ x), data.frame(x))
+```
+
+Testing wrapper function
+```{r}
+# testing rmse individually
+test_metrics_rmse <- common_metrics(resp, pred, metrics = "RMSE")
+print(test_metrics_rmse)
+
+# testing mae individually
+test_metrics_mae <- common_metrics(resp, pred, metrics = "MAE")
+print(test_metrics_mae)
+
+# testing default values (both)
+test_metrics_default <- common_metrics(resp, pred)
+print(test_metrics_default)
+
+resp[c(10, 99)] <- NA_real_
+
+# testing rmse individually with na
+test_metrics_rmse1 <- common_metrics(resp, pred, metrics = "RMSE")
+print(test_metrics_rmse1)
+
+# testing mae individually with na
+test_metrics_mae1 <- common_metrics(resp, pred, metrics = "MAE")
+print(test_metrics_mae1)
+
+# testing default values (both) with na
+test_metrics_default1 <- common_metrics(resp, pred)
+print(test_metrics_default1)
+
+# testing with invalid data
+resp <- data.frame(a = c(1, 2, 3), b = c(1, 2, 3))
+
+#test_metrics <- common_metrics(resp, pred)
+#print(test_metrics)
+
+# couldn't get the above to still render and show that an error was caught
+test_metrics <- function() {
+  tryCatch({
+    common_metrics(resp, pred)  
+  }, error = function(e) {
+    message("Error caught: ", e$message)
+    return(NULL)
+  })
+}
+
+result <- test_metrics()
+print(result) # print null with an error
+```
+
+## Task 3: Querying an API and a Tidy-Style Function
+
+Using the API to retrieve information about Tesla
+```{r}
+api <- "https://newsapi.org/v2/everything?q="
+topic <- "tesla"
+key <- "10e41a08fc9c4984a281f00cc24ffaef"
+from_date <- Sys.Date() - 30 
+
+url_str <- paste0(api, topic, "&from=", format(from_date, "%Y-%m-%d"), "&apiKey=", key)
+print(url_str)
+
+tesla_info <- GET(url_str) |>
+  content("text")  |>
+  fromJSON(flatten = TRUE, simplifyDataFrame = TRUE) |> 
+  pluck("articles")
+
+str(tesla_info) #was not getting a list for my first col
+```
+
+Function that allows user to query the API
+```{r}
+news_api <- function(topic, from_date, key) {
+    api <- "https://newsapi.org/v2/everything?q="
+    url_str <- paste0(api, URLencode(topic), "&from=", format(as.Date(from_date), "%Y-%m-%d"), "&apiKey=", key)
+
+    articles <- GET(url_str) |>
+      content("text") |>
+      fromJSON(flatten = TRUE, simplifyDataFrame = TRUE) |> 
+      pluck("articles")
+
+    return(articles) 
+}
+```
+
+Getting data for two different topics
+```{r}
+tesla_data <- news_api(topic = "tesla", from_date, key)
+head(tesla_data)
+
+amazon_data <- news_api(topic = "amazon", from_date, key)
+head(amazon_data)
+```
+
+Summary of source.name for tesla_data
+```{r}
+source_summary <- table(tesla_data$source.name)
+print(source_summary)
+
+source_summary_df <- as.data.frame(source_summary)
+colnames(source_summary_df) <- c("Source", "Count")
+print(source_summary_df)
+```
+
+Converting to dates and sorting on published col. Then creating a new col pub_diff.
+```{r}
+tesla_data_sort <- tesla_data |> 
+  mutate(publishedAt = ymd_hms(publishedAt)) |>
+  arrange(publishedAt) |>
+  mutate(pub_diff = publishedAt - lag(publishedAt))
+head(tesla_data)
+
+amazon_data_sort <- amazon_data |> 
+  mutate(publishedAt = ymd_hms(publishedAt)) |>
+  arrange(publishedAt) |>
+  mutate(pub_diff = publishedAt - lag(publishedAt))
+head(amazon_data)
+```
+
+Creating a subset of the amazon data and using map() to return numeric summaries
+```{r}
+amazon_subset <- amazon_data_sort|>
+  select(publishedAt, pub_diff)
+  
+num_sum <- map(amazon_subset, \(x) {
+  list(
+    mean = mean(x, na.rm = TRUE),
+    sd = sd(x, na.rm = TRUE),
+    median = median(x, na.rm = TRUE))
+})
+num_sum
+```
+
